@@ -313,14 +313,14 @@ This model **decreased AIC** but **increased BIC** compared to the default model
 mod4_ar1 <- lme(
   yield_kgha ~ krate_kgha*nrate_kgha*fdap,
   random = ~ 1|block/krate_kgha/nrate_kgha,
-
+  correlation = corAR1(form = ~ dap), #corCAR1 - if you have different intervals
   data = rm_rcbd_df)
 
 mod4_ar1
 ```
 Notice how we have a **phi** estimate above, which is the estimated correlation parameter.  
 
-In this case, it was estimated as zero.
+In this case, it was estimated as zero. 
 
 ## empirical autocorrelation function  
 ```{r}
@@ -347,7 +347,7 @@ AR1 model had the same dfs and fit metrics as the CS model.
 mod5_arma11 <- lme(
   yield_kgha ~ krate_kgha*nrate_kgha*fdap,
   random = ~ 1|block/krate_kgha/nrate_kgha,
-
+correlation = corARMA(p = 1, q = 1),
   data = rm_rcbd_df)
 
 mod5_arma11
@@ -374,6 +374,8 @@ anova(mod1_default,
 ```
 ARMA11 consumed 1 more df and overall increased AIC and BIC (poorer fit).  
 
+*model 1-5 = serial correlations
+
 # Model 6 - Exponential  
 Let's fit our first **spatial** correlation structure.  
 
@@ -381,12 +383,14 @@ Let's fit our first **spatial** correlation structure.
 mod6_exp <- lme(
   yield_kgha ~ krate_kgha*nrate_kgha*fdap,
   random = ~ 1|block/krate_kgha/nrate_kgha,
-
+correlation = corExp(form = ~ dap),
   data = rm_rcbd_df)
 
 mod6_exp
 ```
 Notice how we have a **range** estimate above, which is the estimated correlation parameter for spatial models.  
+Correlation Structure: Exponential spatial correlation - gives us an estimate of range
+Semivariogram - if it plateaus out, then, your correlation also plateaus out
 
 ## empirical autocorrelation function  
 ```{r}
@@ -408,12 +412,15 @@ A few things to notice:
   - The actual exponential line is not even appearing in the plot (i.e., it did not fit the data)  
   - Based on this, I would not expect for this model to perform well in our data.  
   
+  * distances = time intervals, 10, 20, 30
   
 ## interval on range  
 ```{r}
 intervals(mod6_exp, which = "var-cov")
 ```
 range interval does not include 0, so it is significant.
+
+range - is where the correlation plateus out - in interval,  0.4526429 3.612324 28.82821 days
 
 ## comparison
 ```{r}
@@ -423,19 +430,23 @@ anova(mod1_default,
 ```
 Although model 6 (exponential) did fix the autocorrelation issue and had a significant range estimate, it increased fit metrics when compared to other models. 
 
-Thus, our best candidate remains model 3 (general).    
+Thus, our best candidate remains model 3 (general). 
+
+
 
 # Model 7 - Gaussian  
 ```{r}
 mod7_gaus <- lme(
   yield_kgha ~ krate_kgha*nrate_kgha*fdap,
   random = ~ 1|block/krate_kgha/nrate_kgha,
-
+correlation = corGaus(form = ~ dap),
   data = rm_rcbd_df)
 
 mod7_gaus
 ```
 Notice how we have a **range** estimate above, which is the estimated correlation parameter for spatial models.  
+
+rang = 6 days, means that up until that point, data is correlated, after that, it's not
 
 ## empirical autocorrelation function  
 ```{r}
@@ -456,6 +467,7 @@ Same issue as with the exponential, no semivariogram fit.
 intervals(mod7_gaus, which = "var-cov")
 ```
 range interval does not include 0, so it is significant.  
+range is still wide, thus, very variable
 
 ## comparison
 ```{r}
@@ -472,7 +484,7 @@ Thus, our best candidate remains model 3 (general).
 mod8_lin <- lme(
   yield_kgha ~ krate_kgha*nrate_kgha*fdap,
   random = ~ 1|block/krate_kgha/nrate_kgha,
-
+correlation = corLin(form = ~ dap),
   data = rm_rcbd_df)
 
 mod8_lin
@@ -516,7 +528,7 @@ Thus, our best candidate remains model 3 (general).
 mod9_rq <- lme(
   yield_kgha ~ krate_kgha*nrate_kgha*fdap,
   random = ~ 1|block/krate_kgha/nrate_kgha,
-
+correlation = corRatio( form = ~ dap),
   data = rm_rcbd_df)
 
 mod9_rq
@@ -559,7 +571,7 @@ Thus, our best candidate remains model 3 (general).
 mod10_sph <- lme(
   yield_kgha ~ krate_kgha*nrate_kgha*fdap,
   random = ~ 1|block/krate_kgha/nrate_kgha,
-
+correlation = corSpher(form = ~ dap),
   data = rm_rcbd_df)
 
 mod10_sph
@@ -590,7 +602,12 @@ range interval does not include 0, so it is significant.
 ```{r}
 anova(mod1_default, 
       mod2_cs, mod3_gen, mod4_ar1, mod5_arma11,
-      mod6_exp, mod7_gaus, mod8_lin, mod9_rq, mod10_sph) 
+      mod6_exp, mod7_gaus, mod8_lin, mod9_rq, mod10_sph) %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "modelname") %>%
+  janitor::clean_names() %>%
+  dplyr::select(modelname, model, df, aic, bic) %>%
+  arrange(aic)
 
 ```
 After fitting the default model and comparing it to other 9 models that included serial and spatial correlation structures, we found that:  
@@ -605,13 +622,16 @@ At this point, our next steps will depend on the metric we decide to use:
   - If we use **AIC**, then we would select the **general model** to perform inference  
   - If we use **BIC**, then we would select the **default model** to perform inference  
   
-Let's assume that the general model was the best, and perform inference on it.  
+Let's assume that the general model was the best, and perform inference on it.
+
+* consuming more df is not a problem if it would help your model to be better fit to your data
+* The increase in df in mod 3 is coz it's the most complex model
 
 # Checking residuals  
 ```{r}
 library(broom.mixed)
 mod3_gen_resid <- augment(mod3_gen) %>%
-  mutate(.stdresid=resid(mod3_gen, type="pearson", scaled=T))
+  mutate(.stdresid=resid(mod3_gen, type="pearson", scaled=T)) #stdresid = standardized residual; augment fn - take dataset and appends the residuals
 
 mod3_gen_resid
 ```
@@ -631,6 +651,7 @@ ranef(mod3_gen)[[1]] %>%
   theme_bw()
 
 ```
+4 points coz 4 blocks
 
 ### Block:krate random effects are iid ~ N(0,var_b)  
 ```{r }
@@ -647,6 +668,7 @@ ranef(mod3_gen)[[2]] %>%
   theme_bw()
 
 ```
+12 obs, coz of 4 blocks and 3 K levels
 
 ### Block:krate:nrate random effects are iid ~ N(0,var_c)  
 ```{r }
@@ -663,8 +685,9 @@ ranef(mod3_gen)[[3]] %>%
   theme_bw()
 
 ```
+assumptions on Random effects: Block:krate:nrate
 
-### Within-group errors are iid ~ N(0, var_e)  
+### Within-group errors are iid ~ N(0, var_e)  : Residuals
 ```{r }
 ggplot(mod3_gen_resid, aes(x=.fitted, y=.stdresid))+
   geom_hline(yintercept = 0, color="red")+
@@ -676,6 +699,7 @@ ggplot(mod3_gen_resid, aes(x=.fitted, y=.stdresid))+
   geom_hline(yintercept = c(-3,3), color = "red")+
   theme_bw()
 ```
+* changing data and model would change the residuals
 
 ```{r}
 ggplot(mod3_gen_resid, aes(sample=.stdresid))+
@@ -699,7 +723,7 @@ We can proceed with inference.
 ```{r anova}
 Anova(mod3_gen, type = 3)
 ```
-> Looking at the ANOVA table above, which means would you extract?  
+> Looking at the ANOVA table above, which means would you extract? krate_kgha:nrate_kgha:fdap 
 
 ## K x N x dap interaction  
 ```{r}
@@ -751,6 +775,8 @@ I'm going to skip the code for checking model assumptions for the default model,
 Anova(mod1_default, type = 3)
 ```
 > Take a moment to compare this ANOVA table with that from the general model (the one we ran just prior). Do you see any differences?  
+
+in mod 1, krate_kgha:nrate_kgha (look at the most complex and explain the breakdown) and fdap 
 
 ## K x N x dap interaction  
 ```{r}
@@ -809,7 +835,7 @@ This is not always the case!
 
 In cases with **more strongly correlated errors**, you would see a larger difference in AIC and BIC among different models, and the proper model selection at the end could make a **HUGE difference on inference**.  
 
-
+* Repeated measures will not impact the means but will impact the errors. Getting the right error... then, you could dmake the right inference
 
 
 
